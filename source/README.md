@@ -3,7 +3,7 @@
 * S3 bucket (you will provide bucket name as CloudFormation parameter)
 * SNS topic (you will provide email address as CloudFormation parameter)
 * CloudWatch events for AWS Transcribe and AWS MediaConvert
-* MediaConvert .JSON template with job settings
+* MediaConvert JSON template with job settings
 * Lambda Python scripts
 * SSM Parameter store
 * CloudFront distribution for S3 folder containing final video playlist and CloudFront Origin Access Identity
