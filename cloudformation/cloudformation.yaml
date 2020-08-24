@@ -1,0 +1,364 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description:
+  Creates S3 folders, IAM policies, SNS topic, CloudWatch Event, and Lambda functions for VOD with manual ambient captioning workflow  
+
+Parameters:
+  NotificationEmail:
+    Description: Email address for SNS notifications
+    Type: String
+    AllowedPattern: "^[_A-Za-z0-9-\\+]+(\\.[_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(\\.[A-Za-z0-9]+)*(\\.[A-Za-z]{2,})$"
+
+  ProjectBucketName:
+    Description: 'Name of the S3 bucket that will be used to upload videos and caption files to AWS and by MediaConvert to hold SRT caption files and final videos'
+    Type: String
+    MinLength: "1"
+    MaxLength: "64"
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9-]*"
+    ConstraintDescription: "must begin with a letter and contain only alphanumeric characters or hyphens."
+
+  SourceZipFileBucketName:
+    Description: 'Name of the S3 bucket that contains the Lambda function zip files'
+    Type: String
+    MinLength: "1"
+    MaxLength: "64"
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9-]*"
+    ConstraintDescription: "must begin with a letter and contain only alphanumeric characters or hyphens."
+
+Resources:
+  MediaConvertRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-MediaConvertRole"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "mediaconvert.amazonaws.com"
+                - "mediaconvert.us-east-1.amazonaws.com"
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-MediaConvertPolicy"
+          PolicyDocument:
+            Statement:
+              - Effect: "Allow"
+                Action: "s3:*"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "cloudwatch:*"
+                  - "logs:*"
+                  - "sns:*"
+                Resource: "*"
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-LambdaRole"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+                - sts:AssumeRole
+      Policies:
+        -
+          PolicyName: !Sub "${AWS::StackName}-LambdaPolicy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Sid: Logging
+                Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+              -
+                Sid: PassRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt MediaConvertRole.Arn
+              -
+                Sid: TranscribeService
+                Effect: Allow
+                Action: "transcribe:*"
+                Resource: "*"
+              -
+                Sid: SSM
+                Effect: Allow
+                Action: "ssm:GetParameter"
+                Resource: !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter/*'               
+              -
+                Sid: MediaConvertService
+                Effect: Allow
+                Action: "mediaconvert:*"
+                Resource: "*"
+              -
+                Sid: S3Buckets
+                Effect: Allow
+                Action: "s3:*"
+                Resource: "*"
+
+  S3InvokeLambdaTranscribe:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaTranscribe.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+ 
+  S3InvokeLambdaJSONtoSRTtoMC:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaJSONtoSRTtoMC.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+ 
+  ProjectBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref ProjectBucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Function: !GetAtt LambdaTranscribe.Arn
+            Event: "s3:ObjectCreated:*" 
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: "videos-upload/"
+                  - Name: suffix
+                    Value: "mp4"
+
+          - Function: !GetAtt LambdaJSONtoSRTtoMC.Arn
+            Event: "s3:ObjectCreated:*"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: "modified-captions-upload/"
+
+  ProjectBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    DependsOn: ProjectBucket
+    Properties:
+      Bucket: !Ref ProjectBucket
+      PolicyDocument:
+        Statement:
+          - Action: "s3:Get*"
+            Effect: Allow
+            Resource: !Join ["", [!GetAtt ProjectBucket.Arn,"/videos-out/*"]]
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+
+  LambdaTranscribe:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-video-Transcribe
+      Description: Transcribes audio track from video into JSON  
+      Handler: video-transcribe.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Code:
+        S3Bucket: !Ref SourceZipFileBucketName
+        S3Key: "video-transcribe.zip"
+      Runtime:  python3.8
+      Timeout: 120
+  
+  LambdaJSONtoSRTtoMC:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-JSON-SRT-MC
+      Description: Converts JSON to SRT then creates MediaConvert job
+      Handler: JSON-SRT-MC.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Code:
+        S3Bucket: !Ref SourceZipFileBucketName
+        S3Key: "json-srt-mc.zip"
+      Runtime:  python3.8
+      Timeout: 120
+  
+  NotificationSNS:
+    Type: AWS::SNS::Topic
+    Properties:
+     Subscription:
+       -
+         Endpoint: !Ref NotificationEmail
+         Protocol: email
+  
+  NotificationTopicPolicy: 
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          -
+            Sid: AllowCloudWatchEvents 
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com 
+            Action: sns:Publish 
+            Resource: "*" #grant rights to all SNS topics (narrow it down if security is an issue)
+      Topics:
+          - !Ref NotificationSNS
+
+  CloudWatchEventRuleTScomplete:
+    Type: "AWS::Events::Rule"
+    Properties: 
+      Description: catches Transcribe completed event and sends to SNS topic
+      State: "ENABLED"
+      EventPattern: 
+        source:
+          - "aws.transcribe" 
+        detail-type:
+          - "Transcribe Job State Change"
+        detail: 
+          TranscriptionJobStatus: 
+            - "COMPLETED"
+      Targets:
+        -
+          Arn: !Ref NotificationSNS
+          Id: "TargetSNS"
+          InputTransformer:
+            InputPathsMap: 
+              jobId: "$.detail.TranscriptionJobName"
+              status: "$.detail.TranscriptionJobStatus"
+            InputTemplate: '"Transcribe job <jobId> finished with status <status>. Download and modify the <jobId>.json file to add ambient captions. Then upload the modified .json file to the modified_captions_upload folder to continue processing."'
+
+  CloudWatchEventRuleTSprogressing:
+    Type: "AWS::Events::Rule"
+    Properties: 
+      Description: catches Transcribe in_progress event and sends to SNS topic
+      State: "ENABLED"
+      EventPattern: 
+        source:
+          - "aws.transcribe" 
+        detail-type:
+          - "Transcribe Job State Change"
+        detail: 
+          TranscriptionJobStatus: 
+            - "IN_PROGRESS"
+      Targets:
+        -
+          Arn: !Ref NotificationSNS
+          Id: "TargetSNS"
+          InputTransformer:
+            InputPathsMap: 
+              jobId: "$.detail.TranscriptionJobName"
+              status: "$.detail.TranscriptionJobStatus"
+            InputTemplate: '"Transcribe job <jobId> is running with status <status>. An email will be sent when the job is complete."'
+
+  CloudFrontDistribution:
+    Type: "AWS::CloudFront::Distribution"
+    Description: CloudFront distribution for S3 video output bucket
+    DependsOn: ProjectBucket
+    Properties:
+      DistributionConfig:
+        DefaultCacheBehavior:
+            Compress: true
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            ForwardedValues:
+              QueryString: 'false'
+              Cookies:
+                Forward: 'none'
+            TargetOriginId: 'S3Origin'
+            ViewerProtocolPolicy: allow-all
+        Origins:
+          - DomainName: !GetAtt ProjectBucket.DomainName
+            Id: 'S3Origin'
+            S3OriginConfig:
+              OriginAccessIdentity: !Join ["", ["origin-access-identity/cloudfront/", !Ref CloudFrontOAI]]
+            OriginPath: '/videos-out'
+        Enabled: 'true'
+        PriceClass: 'PriceClass_All'
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: 'true'
+
+  CloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties: 
+      CloudFrontOriginAccessIdentityConfig: 
+        Comment: !Join ["", [!Ref ProjectBucket, "-OAI"]]
+
+  CloudWatchEventRuleMCcomplete:
+    Type: "AWS::Events::Rule"
+    Properties: 
+      Description: catches MediaConvert Completed event and sends to SNS topic
+      State: "ENABLED"
+      EventPattern: 
+        source:
+          - "aws.mediaconvert" 
+        detail-type:
+          - "MediaConvert Job State Change"
+        detail: 
+          status:
+            - "COMPLETE"
+      Targets:
+        -
+          Arn: !Ref NotificationSNS
+          Id: "TargetSNS"
+          InputTransformer:
+            InputPathsMap: 
+              jobId: "$.detail.jobId"
+              status: "$.detail.status"
+              playlistpath: "$.detail.outputGroupDetails[0].playlistFilePaths"
+            InputTemplate: '"MediaConvert job <jobId> finished with status <status>. Playlist location is <playlistpath>."'
+
+  CloudWatchEventRuleMCprogressing:
+    Type: "AWS::Events::Rule"
+    Properties: 
+      Description: catches MediaConvert Progressing event and sends to SNS topic
+      State: "ENABLED"
+      EventPattern: 
+        source:
+          - "aws.mediaconvert" 
+        detail-type:
+          - "MediaConvert Job State Change"
+        detail: 
+          status:
+            - "PROGRESSING"
+      Targets:
+        -
+          Arn: !Ref NotificationSNS
+          Id: "TargetSNS"
+          InputTransformer:
+            InputPathsMap: 
+              jobId: "$.detail.jobId"
+              status: "$.detail.status"
+            InputTemplate: '"MediaConvert job <jobId> is running with status <status>. An email will be sent when the job is complete."'
+
+  ProjectBucketParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: project-bucket-name
+      Type: String
+      Value: !Ref ProjectBucketName
+      Description: SSM Parameter for the Project Bucket name
+
+  MCRoleParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: mediaconvert-role-arn
+      Type: String
+      Value: !GetAtt MediaConvertRole.Arn
+      Description: SSM Parameter for the Media Convert role Arn
+
+Outputs:
+  ProjectBucket:
+    Value: !Ref ProjectBucket
+  CloudFrontDistributionURL:
+    Value: !Join ["", ["https://", !GetAtt CloudFrontDistribution.DomainName]]
