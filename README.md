@@ -79,11 +79,11 @@ Click into the folder and upload your source .mp4 video.
 
 **2. (automatic)** After your upload completes, Lambda Python function will automatically execute.   
 
-**3. (automatic)** The Lambda function creates an AWS Transcribe job which will create a .JSON output file from the source video.
+**3. (automatic)** The Lambda function creates an AWS Transcribe job which will create a JSON output file from the source video.
 
-**4. (automatic)** The Lambda function saves the .JSON transcription output file to the S3 bucket.  CloudWatch events monitors the Transcribe job and sends an email via SNS to the address that you specified when job is complete (note: in order to receive this email, you must have already clicked the link in the subscription confirmation email).
+**4. (automatic)** The Lambda function saves the JSON transcription output file to the S3 bucket.  CloudWatch events monitors the Transcribe job and sends an email via SNS to the address that you specified when job is complete (note: in order to receive this email, you must have already clicked the link in the subscription confirmation email).
 
-**5.** Download the .JSON file from the S3 bucket to your computer.  Modify the .json file and add the appropriate ambient captions.  You can use software of your choice here, or even a text editor such as vim.
+**5.** Download the JSON file from the S3 bucket to your computer.  Modify the file and add the appropriate ambient captions.  You can use software of your choice here, or even a text editor such as vim.
 
 **6.** You will notice that a new folder "modified-video-uploads" has been automatically created for you in the S3 bucket.  Upload the modified .json file to this new folder.
 
@@ -91,7 +91,7 @@ Click into the folder and upload your source .mp4 video.
 
 **7. (automatic)** After your upload completes, Lambda Python function will automatically execute.
 
-**8. (automatic)** The Lambda function converts .JSON to .SRT format and then initiates a MediaConvert job that uses parameters in the provided MediaConvert template to embeds WebVTT captions in your source .mp4 video and create HLS output.  CloudWatch events sends an email notification when the MediaConvert job is in progress.
+**8. (automatic)** The Lambda function converts JSON to SRT format and then initiates a MediaConvert job that uses parameters in the provided MediaConvert template to embeds WebVTT captions in your source .mp4 video and create HLS output.  CloudWatch events sends an email notification when the MediaConvert job is in progress.
 
 **9. (automatic)** An output folder is created in the S3 bucket and the MediaConvert .m3u8 playlist is saved to the folder.  CloudWatch events sends an email notification when the MediaConvert job is complete.
 
@@ -127,13 +127,13 @@ You should see an option to enable captions in the video.  Choose English langua
 
 # Credits
 
-Jillian Forde, AWS Solutions Architect and host of AWS "How to Build This", was the inspiration for this project which benefits diversity and inclusion initiatives
+Jillian Forde, AWS Solutions Architect and host of AWS "How to Build This" was the inspiration for this project which benefits diversity and inclusion initiatives
 
 John Councilman, AWS Elemental Solutions Architect, provided expertise with MediaConvert and industry captioning practices
 
 Arturo Velasco, AWS Solutions Architect, code review and repo recommendations
 
-Rob Dachowski, AWS SA Manager, original author of Python script to convert Amazon Transcribe JSON output to SRT format
+Rob Dachowski, AWS Solutions Architect Manager, original author of Python script to convert Amazon Transcribe JSON output to SRT format
 
 # Contributors
 
