@@ -130,6 +130,13 @@ Resources:
     DeletionPolicy: Retain
     Properties:
       BucketName: !Ref ProjectBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'AES256'
+            BucketKeyEnabled: false
       NotificationConfiguration:
         LambdaConfigurations:
           - Function: !GetAtt LambdaTranscribe.Arn
@@ -192,6 +199,7 @@ Resources:
   NotificationSNS:
     Type: AWS::SNS::Topic
     Properties:
+     KmsMasterKeyId: 'alias/aws/sns'
      Subscription:
        -
          Endpoint: !Ref NotificationEmail

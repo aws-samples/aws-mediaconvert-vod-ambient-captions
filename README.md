@@ -69,11 +69,7 @@ During CloudFormation stack creation, you will receive an SNS topic subscription
 
 ## Steps to create ambient captions for your source .mp4 video
 
-**1.** Navigate to the S3 bucket and create a videos-upload folder (note: the automation workflow expects the name of this folder to be videos-upload). 
-
- ![](images/s3-1.png)
-	
-Click into the folder and upload your source .mp4 video.
+**1.** Navigate to the S3 bucket that you specified as ProjectBucketName CloudFormation Parameter and create an encrypted folder named videos-upload (note: the automation workflow expects the name of this folder to be videos-upload). Click into the folder and upload your source .mp4 video.
 
  ![](images/s3-2.png)
 
